@@ -1,0 +1,96 @@
+# Security Log Analyzer - Docker Compose Configuration
+# Orchestrates Flask app, ChromaDB, and Ollama services
+
+version: '3.8'
+
+services:
+  # Flask Application Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sla-app
+    ports:
+      - "5000:5000"  # Expose Flask on host port 5000
+    volumes:
+      # Persist SQLite database and user data
+      - ./data:/app/data
+      # Persist application logs
+      - ./logs:/app/logs
+    env_file:
+      - .env  # Load environment variables from .env file
+    depends_on:
+      chromadb:
+        condition: service_healthy  # Wait for ChromaDB to be healthy
+      ollama:
+        condition: service_healthy  # Wait for Ollama to be healthy
+    restart: unless-stopped  # Auto-restart on failure (except manual stop)
+    networks:
+      - sla-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # Give app time to start and pull Ollama model
+
+  # ChromaDB Vector Database Service
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: sla-chromadb
+    ports:
+      - "8000:8000"  # Expose ChromaDB API
+    volumes:
+      # Persist vector database data
+      - chroma-data:/chroma/chroma
+    environment:
+      - IS_PERSISTENT=TRUE
+      - ANONYMIZED_TELEMETRY=FALSE
+    restart: unless-stopped
+    networks:
+      - sla-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # Ollama LLM Service
+  ollama:
+    image: ollama/ollama:latest
+    container_name: sla-ollama
+    ports:
+      - "11434:11434"  # Expose Ollama API
+    volumes:
+      # Persist downloaded models
+      - ollama-data:/root/.ollama
+    restart: unless-stopped
+    networks:
+      - sla-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:11434/api/tags"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    # Uncomment below to enable GPU support (requires nvidia-docker)
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+# Named volumes for data persistence
+volumes:
+  chroma-data:
+    driver: local
+  ollama-data:
+    driver: local
+
+# Custom network for service communication
+networks:
+  sla-network:
+    driver: bridge

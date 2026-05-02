@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security Log Analyzer - Dashboard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #0f172a; color: #e2e8f0; padding: 20px; }
+        .container { max-width: 1400px; margin: 0 auto; }
+        h1 { color: #60a5fa; margin-bottom: 10px; font-size: 28px; }
+        .subtitle { color: #94a3b8; margin-bottom: 30px; }
+        
+        .query-box { background: #1e293b; padding: 20px; border-radius: 8px; margin-bottom: 20px; }
+        .query-box input { width: calc(100% - 120px); padding: 12px; background: #0f172a; border: 1px solid #334155; color: #e2e8f0; border-radius: 4px; font-size: 14px; }
+        .query-box button { width: 100px; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 4px; cursor: pointer; margin-left: 10px; font-size: 14px; font-weight: 600; }
+        .query-box button:hover { background: #2563eb; }
+        .query-box button:disabled { background: #475569; cursor: not-allowed; }
+        
+        .stats-bar { display: flex; gap: 15px; margin-bottom: 20px; }
+        .stat-card { background: #1e293b; padding: 15px; border-radius: 8px; flex: 1; }
+        .stat-value { font-size: 24px; font-weight: bold; color: #60a5fa; }
+        .stat-label { color: #94a3b8; font-size: 12px; margin-top: 5px; }
+        
+        .content { display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }
+        
+        .panel { background: #1e293b; padding: 20px; border-radius: 8px; }
+        .panel h2 { color: #60a5fa; margin-bottom: 15px; font-size: 18px; }
+        
+        .threat-panel { background: #1e293b; padding: 20px; border-radius: 8px; }
+        .threat-none { color: #94a3b8; font-style: italic; }
+        .threat-detected { background: #7f1d1d; padding: 15px; border-radius: 6px; border-left: 4px solid #dc2626; }
+        .threat-type { color: #fca5a5; font-weight: bold; font-size: 16px; margin-bottom: 8px; }
+        .threat-confidence { color: #cbd5e1; font-size: 13px; margin-bottom: 8px; }
+        .threat-reason { color: #e2e8f0; font-size: 14px; line-height: 1.5; }
+        
+        .logs-table { width: 100%; border-collapse: collapse; }
+        .logs-table th { background: #0f172a; padding: 12px; text-align: left; color: #94a3b8; font-size: 12px; text-transform: uppercase; border-bottom: 2px solid #334155; }
+        .logs-table td { padding: 10px 12px; border-bottom: 1px solid #334155; font-size: 13px; }
+        .logs-table tr:hover { background: #0f172a; }
+        
+        .severity-critical { color: #dc2626; font-weight: bold; }
+        .severity-high { color: #f97316; font-weight: bold; }
+        .severity-medium { color: #eab308; }
+        .severity-low { color: #22c55e; }
+        .severity-info { color: #94a3b8; }
+        
+        .log-message { max-width: 500px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .no-logs { color: #94a3b8; text-align: center; padding: 40px; font-style: italic; }
+        
+        .loading { color: #60a5fa; text-align: center; padding: 20px; }
+        .error { color: #ef4444; padding: 15px; background: #7f1d1d; border-radius: 6px; margin-bottom: 20px; }
+        .filters-info { color: #94a3b8; font-size: 12px; margin-top: 10px; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔒 Security Log Analyzer</h1>
+        <div class="subtitle">Real-time security log analysis with RAG</div>
+        
+        <div class="stats-bar" id="statsBar">
+            <div class="stat-card">
+                <div class="stat-value" id="totalLogs">-</div>
+                <div class="stat-label">Total Logs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="authLogs">-</div>
+                <div class="stat-label">Auth Logs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="httpLogs">-</div>
+                <div class="stat-label">HTTP Logs</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="systemLogs">-</div>
+                <div class="stat-label">System Logs</div>
+            </div>
+        </div>
+        
+        <div class="query-box">
+            <input type="text" id="queryInput" placeholder="Enter query: e.g., 'failed logins from last 10 minutes' or 'high severity logs from 192.168.1.100'" />
+            <button onclick="executeQuery()" id="queryBtn">Search</button>
+        </div>
+        
+        <div id="errorMsg"></div>
+        <div id="filtersInfo" class="filters-info"></div>
+        
+        <div class="content">
+            <div class="panel">
+                <h2>📋 Logs</h2>
+                <div id="logsContainer">
+                    <div class="no-logs">Enter a query to search logs</div>
+                </div>
+            </div>
+            
+            <div class="threat-panel">
+                <h2>⚠️ Threat Detection</h2>
+                <div id="threatContainer">
+                    <div class="threat-none">No threats detected</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        window.onload = function() {
+            loadStats();
+        };
+        
+        document.getElementById('queryInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                executeQuery();
+            }
+        });
+        
+        async function loadStats() {
+            try {
+                const response = await fetch('/api/dashboard/stats');
+                const data = await response.json();
+                
+                if (data.status === 'success') {
+                    const stats = data.stats;
+                    document.getElementById('totalLogs').textContent = stats.total || 0;
+                    document.getElementById('authLogs').textContent = stats.by_collection?.auth || 0;
+                    document.getElementById('httpLogs').textContent = stats.by_collection?.http || 0;
+                    document.getElementById('systemLogs').textContent = stats.by_collection?.system || 0;
+                }
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        }
+        
+        async function executeQuery() {
+            const query = document.getElementById('queryInput').value.trim();
+            const errorMsg = document.getElementById('errorMsg');
+            const filtersInfo = document.getElementById('filtersInfo');
+            const queryBtn = document.getElementById('queryBtn');
+            
+            errorMsg.innerHTML = '';
+            filtersInfo.innerHTML = '';
+            
+            if (!query) {
+                errorMsg.innerHTML = '<div class="error">Please enter a query</div>';
+                return;
+            }
+            
+            document.getElementById('logsContainer').innerHTML = '<div class="loading">Searching logs...</div>';
+            document.getElementById('threatContainer').innerHTML = '<div class="loading">Analyzing...</div>';
+            queryBtn.disabled = true;
+            queryBtn.textContent = 'Searching...';
+            
+            try {
+                const response = await fetch('/api/dashboard/query', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, top_k: 20 })
+                });
+                
+                const data = await response.json();
+                
+                if (data.status === 'error') {
+                    errorMsg.innerHTML = `<div class="error">Error: ${data.message}</div>`;
+                    document.getElementById('logsContainer').innerHTML = '<div class="no-logs">Query failed</div>';
+                    document.getElementById('threatContainer').innerHTML = '<div class="threat-none">No analysis available</div>';
+                    return;
+                }
+                
+                if (data.filters_applied && data.filters_applied !== 'None') {
+                    filtersInfo.innerHTML = `Filters: ${data.filters_applied}`;
+                }
+                
+                displayLogs(data.logs);
+                displayThreat(data.threat);
+                
+            } catch (error) {
+                errorMsg.innerHTML = `<div class="error">Request failed: ${error.message}</div>`;
+                document.getElementById('logsContainer').innerHTML = '<div class="no-logs">Request failed</div>';
+            } finally {
+                queryBtn.disabled = false;
+                queryBtn.textContent = 'Search';
+            }
+        }
+        
+        function displayLogs(logs) {
+            const container = document.getElementById('logsContainer');
+            
+            if (!logs || logs.length === 0) {
+                container.innerHTML = '<div class="no-logs">No logs found</div>';
+                return;
+            }
+            
+            let html = '<table class="logs-table"><thead><tr>';
+            html += '<th>Timestamp</th><th>IP</th><th>Severity</th><th>Type</th><th>Message</th>';
+            html += '</tr></thead><tbody>';
+            
+            logs.forEach(log => {
+                const severityClass = `severity-${log.severity}`;
+                html += '<tr>';
+                html += `<td>${log.timestamp}</td>`;
+                html += `<td>${log.ip}</td>`;
+                html += `<td class="${severityClass}">${log.severity.toUpperCase()}</td>`;
+                html += `<td>${log.type}</td>`;
+                html += `<td class="log-message" title="${log.message}">${log.message}</td>`;
+                html += '</tr>';
+            });
+            
+            html += '</tbody></table>';
+            container.innerHTML = html;
+        }
+        
+        function displayThreat(threat) {
+            const container = document.getElementById('threatContainer');
+            
+            if (!threat || !threat.detected) {
+                container.innerHTML = '<div class="threat-none">No threats detected</div>';
+                return;
+            }
+            
+            let html = '<div class="threat-detected">';
+            html += `<div class="threat-type">🚨 ${threat.type.toUpperCase().replace('_', ' ')}</div>`;
+            html += `<div class="threat-confidence">Confidence: ${(threat.confidence * 100).toFixed(0)}%</div>`;
+            html += `<div class="threat-reason">${threat.reason}</div>`;
+            html += '</div>';
+            
+            container.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
